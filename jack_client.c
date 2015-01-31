@@ -19,18 +19,34 @@ jack_port_t *out_port;
 #define SINE_WAVE_LEN	BUFFER_LEN
 #define PI				3.14159265
 
-float sine_wave_buf[SINE_WAVE_LEN];
+typedef struct
+{
+	float index;		//position of index in sample
+	int sample_l;		//length of buffer
+	float *sample_buf;	//sample buffer
 
-void output_samples(float *out){
-	static int sine_i = 0;
-	for (int i = 0; i < BUFFER_LEN; ++i)
+} mp3_sample;
+
+float sine_wave_buf[SINE_WAVE_LEN];
+mp3_sample global_sample;
+
+void output_sample(mp3_sample *smp, float *buf){
+	int index = smp->index;
+	int size = smp->sample_l;
+	float *sample_buf = smp->sample_buf;
+	int play_len = BUFFER_LEN;
+	if(size - index < BUFFER_LEN){
+		play_len = size - index;
+	}
+	//printf("i:%d, l:%d\n", index, play_len);
+	for (int i = 0; i < play_len; ++i)
 	{
-		out[i] += sine_wave_buf[sine_i];
-		sine_i += 6;
-		if(sine_i >= BUFFER_LEN){
-			sine_i -= BUFFER_LEN;
+		buf[i] += sample_buf[index++];
+		if(index >= size){
+			index -= size;
 		}
 	}
+	smp->index = index;
 }
 
 //Process the audio frames
@@ -40,13 +56,52 @@ int process_frames(jack_nframes_t nframes, void *arg){
 	//reset
 	memset(out, 0, BUFFER_BYTES);
 	//write out
-	output_samples(out);
+	output_sample(&global_sample, out);
 	return 0;
 }
 
 //Shutdown if error
 void jack_shutdown(void *arg){
 	exit(1);
+}
+
+//Creates a mp3 sample object given the path, start and end times
+mp3_sample load_mp3_sample(const char* filename, float start, float end){
+	mp3_sample smp = {0, 0, NULL};
+
+	//delete if exists
+	system("rm -f sample.raw");
+
+	//convert to raw 32-bit float
+	char command[200];
+	sprintf(command, "avconv -i %s -ac 1 -f f32le sample.raw -loglevel quiet", filename);
+	system(command);
+
+	int bytes, size;
+	FILE* f = fopen("sample.raw", "rb");
+	if(f == NULL){
+		printf("File not found\n");
+		return smp;
+	}
+	fseek(f, 0L, SEEK_END);
+	size = ftell(f);
+	rewind(f);
+	float* samples = (float*)malloc(size);
+	int pos = 0;
+	float val = 0;
+	//float max = 0.0;
+	while((bytes = fread(&val, sizeof(float), 1, f))){
+		samples[pos] = val;
+		pos++;
+	}
+	//copy to struct
+	smp.sample_l = size / sizeof(float);
+	smp.sample_buf = samples;
+
+	//clean up
+	system("rm -f sample.raw");
+
+	return smp;
 }
 
 //Main function
@@ -59,6 +114,8 @@ int main(int argc, char *argv[])
 	{
 		sine_wave_buf[i] = sin((float)(2 * PI * i) / SINE_WAVE_LEN);
 	}
+	//init samples
+	global_sample = load_mp3_sample("samples/funk_d.mp3", 0, 0);
 	//connect to jackd
 	client = jack_client_open ("pedal", JackNullOption, NULL);
 	//set process callback to function above
