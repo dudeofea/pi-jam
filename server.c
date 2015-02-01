@@ -23,26 +23,38 @@ typedef struct
 	int* newsockfds;
 } thread_pool;
 
+thread_pool tp;
+int sockfd;
+
 int doprocessing(int sock);
 
 void* handle_connection(void* args){
 	int* sock = (int*)args;
 	int r = doprocessing(*sock);
-	close(*sock);
+	stop_pijam();
+	for(int i = 0; i < tp.index; i++){
+		close(tp.newsockfds[i]);
+	}
+	close(sockfd);
+	shutdown(sockfd, 2);
 	exit(r);
 }
 
 int main( int argc, char *argv[])
 {
-	int sockfd, newsockfd, portno, clilen;
+	//Start pijam
+	start_pijam();
+
+	int newsockfd, portno, clilen;
 	struct sockaddr_in serv_addr, cli_addr;
 
 	// Init thread pool
-	thread_pool tp = {0, 10, NULL};
+	tp.index = 0;
+	tp.size = 10;
 	tp.thread_ids = (pthread_t*)malloc(tp.size*sizeof(pthread_t));
 	tp.newsockfds = (int*)malloc(tp.size*sizeof(int));
 
-	/* First call to socket() function */
+	//First call to socket() function
 	sockfd = socket(AF_INET, SOCK_STREAM, 0);
 
 	if (sockfd < 0){
@@ -50,31 +62,23 @@ int main( int argc, char *argv[])
 		exit(1);
 	}
 
-	/* Initialize socket structure */
+	// Initialize socket structure
 	bzero((char *) &serv_addr, sizeof(serv_addr));
-	portno = 5001;
+	portno = 5003;
 
 	serv_addr.sin_family = AF_INET;
 	serv_addr.sin_addr.s_addr = INADDR_ANY;
 	serv_addr.sin_port = htons(portno);
 
-	/* Now bind the host address using bind() call.*/
+	// Now bind the host address using bind() call.
 	if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0){
 		perror("ERROR on binding");
 		exit(1);
 	}
 
-	/* Now start listening for the clients, here
-	* process will go in sleep mode and will wait
-	* for the incoming connection
-	*/
-
 	listen(sockfd,5);
 	clilen = sizeof(cli_addr);
-
-	//Start pijam
-	start_pijam();
-
+	
 	while (1)
 	{
 		newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, (socklen_t * restrict) &clilen);
@@ -83,7 +87,7 @@ int main( int argc, char *argv[])
 			exit(1);
 		}
 
-		/* Create child process */
+		// Create child process
 		tp.newsockfds[tp.index] = newsockfd;
 		if(pthread_create(&tp.thread_ids[tp.index], NULL, handle_connection, &tp.newsockfds[tp.index])){
 			printf("error spawning thread\n");
@@ -96,7 +100,7 @@ int main( int argc, char *argv[])
 			tp.newsockfds = (int*)realloc(tp.newsockfds, tp.size * sizeof(int));
 		}
 		//close(newsockfd);
-	} /* end of while */
+	}
 	stop_pijam();
 }
 
@@ -116,16 +120,16 @@ int doprocessing (int sock)
 			//this is the exit code
 			return 0;
 		}
-		play_sample(0);
-		printf("inst: %d, extra: %d\n", instrument, extra);
+		play_sample(instrument, extra);
+		//printf("inst: %d, extra: %d\n", instrument, extra);
 
 		if (n < 0){
 			perror("ERROR reading from socket");
 			return 1;
 		}
 
-		printf("Here is the message: %s\n",buffer);
-		n = write(sock,"I got your message",18);
+		//printf("Here is the message: %s\n",buffer);
+		//n = write(sock,"I got your message",18);
 
 		if (n < 0){
 			perror("ERROR writing to socket");

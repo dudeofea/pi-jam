@@ -25,8 +25,9 @@ jack_client_t *client;
 
 typedef struct
 {
-	int index;			//position of index in sample
+	float index;			//position of index in sample
 	int sample_l;		//length of buffer
+	float speed;
 	float *sample_buf;	//sample buffer
 } mp3_sample;
 
@@ -37,25 +38,40 @@ mp3_sample* global_samples;
 //samples being played
 mp3_sample* playing_samples;
 int playing_samples_l = 0;
+int playing_samples_c = 0;
 sem_t *playing_samples_sem;
 
-void output_sample(mp3_sample *smp, float *buf){
-	int index = smp->index;
-	int size = smp->sample_l;
-	float *sample_buf = smp->sample_buf;
+void output_sample(int smp_i, float *buf){
+	float index = 	playing_samples[smp_i].index;
+	int size = 		playing_samples[smp_i].sample_l;
+	float speed = 	playing_samples[smp_i].speed;
+	float *sample_buf = playing_samples[smp_i].sample_buf;
 	int play_len = BUFFER_LEN;
 	if(size - index < BUFFER_LEN){
 		play_len = size - index;
 	}
-	printf("i:%d, l:%d\n", index, play_len);
+	//printf("i:%d, l:%d\n", index, play_len);
 	for (int i = 0; i < play_len; ++i)
 	{
-		buf[i] += sample_buf[index++];
+		buf[i] += sample_buf[(int)index];
+		index += speed;
 		if(index >= size){
-			index -= size;
+			sem_wait(playing_samples_sem);
+			printf("done\n");
+			//remove from array
+			playing_samples_c--;
+			for (int j = smp_i; j < playing_samples_c; ++j)
+			{
+				//shift
+				playing_samples[j] = playing_samples[j+1];
+			}
+
+			playing_samples[smp_i].sample_l = 0;
+			sem_post(playing_samples_sem);
+			break;
 		}
 	}
-	smp->index = index;
+	playing_samples[smp_i].index = index;
 }
 
 //Process the audio frames
@@ -65,16 +81,10 @@ int process_frames(jack_nframes_t nframes, void *arg){
 	//reset
 	memset(out, 0, BUFFER_BYTES);
 	//play samples
-	/*for (int i = 0; i < playing_samples_l; ++i)
+	for (int i = 0; i < playing_samples_c; ++i)
 	{
-		if(playing_samples[i].sample_l > 0)
-			printf("%d i: %d, s: %d\n", i, playing_samples[i].index, playing_samples[i].sample_l);
-		if(playing_samples[i].index < playing_samples[i].sample_l){
-			printf("playing sample %d\n", i);
-			output_sample(&playing_samples[i], out);
-		}
-	}*/
-	output_sample(&playing_samples[0], out);
+		output_sample(i, out);
+	}
 	return 0;
 }
 
@@ -85,7 +95,11 @@ void jack_shutdown(void *arg){
 
 //Creates a mp3 sample object given the path, start and end times
 mp3_sample load_mp3_sample(const char* filename, float start, float end){
-	mp3_sample smp = {0, 0, NULL};
+	mp3_sample smp = {0, 0, 0, NULL};
+	if(end > 0 && end < start){
+		printf("start must be before end\n");
+		return smp;
+	}
 
 	//delete if exists
 	system("rm -f sample.raw");
@@ -102,18 +116,31 @@ mp3_sample load_mp3_sample(const char* filename, float start, float end){
 		return smp;
 	}
 	fseek(f, 0L, SEEK_END);
-	size = ftell(f);
+	size = ftell(f) / sizeof(float);
 	rewind(f);
-	float* samples = (float*)malloc(size);
+	int max_bytes = SAMPLE_RATE * (end - start);
+	if(end > 0 && max_bytes < size){
+		printf("resizing\n");
+		size = max_bytes;
+	}
+	float* samples = (float*)malloc(size * sizeof(float));
 	int pos = 0;
 	float val = 0;
-	//float max = 0.0;
+	//skip to start value (in seconds)
+	//printf("start: %d size: %d end: %f\n", (int)(SAMPLE_RATE * start), size, end);
+	fseek(f, (int)(SAMPLE_RATE * start * sizeof(float)), SEEK_SET);
+	//read bytes
 	while((bytes = fread(&val, sizeof(float), 1, f))){
 		samples[pos] = val;
 		pos++;
+		//printf("i:%d\n", pos);
+		if(pos >= size){
+			break;
+		}
 	}
 	//copy to struct
-	smp.sample_l = size / sizeof(float);
+	smp.sample_l = size;
+	smp.speed = 1;
 	smp.sample_buf = samples;
 
 	//clean up
@@ -135,7 +162,12 @@ void start_pijam()
 	global_samples = (mp3_sample*) malloc(10*sizeof(mp3_sample));
 	playing_samples = (mp3_sample*) malloc(10*sizeof(mp3_sample));
 	playing_samples_l = 10;
-	global_samples[0] = load_mp3_sample("samples/funk_d.mp3", 0, 0);
+	global_samples[0] = load_mp3_sample("samples/taiko.mp3", 0.0, 0.8);
+	global_samples[1] = load_mp3_sample("samples/taiko.mp3", 2.4, 3.2);
+	global_samples[2] = load_mp3_sample("samples/funk_d.mp3", 0, 0);
+	global_samples[3] = load_mp3_sample("samples/low_d.mp3", 0, 0);
+	global_samples[4] = load_mp3_sample("samples/mid_d.mp3", 0, 0);
+	global_samples[5] = load_mp3_sample("samples/high_d.mp3", 0, 0);
 	//connect to jackd
 	client = jack_client_open ("pedal", JackNullOption, NULL);
 	//set process callback to function above
@@ -172,23 +204,17 @@ void stop_pijam(){
 }
 
 //plays a sample by index
-void play_sample(int ins){
+void play_sample(int ins, int pitch_shift){
 	sem_wait(playing_samples_sem);
-	int i;
-	//look for garbarged samples
-	for (i = 0; i < playing_samples_l; ++i)
-	{
-		if(playing_samples[i].index >= playing_samples[i].sample_l){
-			//index is over length, sample is garbaged
-			break;
-		}
-	}
-	if(i >= playing_samples_l){
+	//load up sample
+	playing_samples[playing_samples_c] = global_samples[ins];
+	playing_samples[playing_samples_c].speed = pow(2.0, (float)pitch_shift / 12);
+	playing_samples_c++;
+	//if out of bounds
+	if(playing_samples_c >= playing_samples_l){
 		printf("out of range\n");
-	}else{
-		//load up sample
-		playing_samples[i] = global_samples[ins];
-		printf("sample %d %d %d %d\n", i, playing_samples[i].index, playing_samples[i].sample_l, (unsigned int)playing_samples[i].sample_buf);
+		playing_samples_l *= 2;
+		playing_samples = (mp3_sample*)realloc(playing_samples, playing_samples_l * sizeof(mp3_sample));
 	}
 	sem_post(playing_samples_sem);
 }
