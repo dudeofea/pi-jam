@@ -9,9 +9,12 @@
 #include <string.h>
 #include <math.h>
 #include <jack/jack.h>
+#include <semaphore.h>
+#include "jack_client.h"
 
 jack_port_t *in_port;
 jack_port_t *out_port;
+jack_client_t *client;
 
 #define BUFFER_LEN		1024
 #define BUFFER_BYTES	BUFFER_LEN * sizeof(float)
@@ -21,14 +24,19 @@ jack_port_t *out_port;
 
 typedef struct
 {
-	float index;		//position of index in sample
+	int index;			//position of index in sample
 	int sample_l;		//length of buffer
 	float *sample_buf;	//sample buffer
-
 } mp3_sample;
 
 float sine_wave_buf[SINE_WAVE_LEN];
-mp3_sample global_sample;
+//sample library
+mp3_sample global_samples;
+
+//samples being played
+mp3_sample playing_samples;
+int playing_samples_l = 0;
+sem_t *playing_samples_sem;
 
 void output_sample(mp3_sample *smp, float *buf){
 	int index = smp->index;
@@ -55,8 +63,13 @@ int process_frames(jack_nframes_t nframes, void *arg){
 	float *out = (float*) jack_port_get_buffer (out_port, nframes);
 	//reset
 	memset(out, 0, BUFFER_BYTES);
-	//write out
-	output_sample(&global_sample, out);
+	//play samples
+	for (int i = 0; i < playing_samples_l; ++i)
+	{
+		if(playing_samples[i].index < playing_samples[i].sample_l){
+			output_sample(&playing_samples[i], out);
+		}
+	}
 	return 0;
 }
 
@@ -105,9 +118,8 @@ mp3_sample load_mp3_sample(const char* filename, float start, float end){
 }
 
 //Main function
-int main(int argc, char *argv[])
+void start_pijam()
 {
-	jack_client_t *client;
 	const char **ports;
 	//init sine wave
 	for (int i = 0; i < SINE_WAVE_LEN; ++i)
@@ -115,7 +127,8 @@ int main(int argc, char *argv[])
 		sine_wave_buf[i] = sin((float)(2 * PI * i) / SINE_WAVE_LEN);
 	}
 	//init samples
-	global_sample = load_mp3_sample("samples/funk_d.mp3", 0, 0);
+	global_samples = 
+	global_samples[0] = load_mp3_sample("samples/funk_d.mp3", 0, 0);
 	//connect to jackd
 	client = jack_client_open ("pedal", JackNullOption, NULL);
 	//set process callback to function above
@@ -127,7 +140,7 @@ int main(int argc, char *argv[])
 	// tell the JACK server that we are ready to roll
 	if (jack_activate (client)) {
 		fprintf (stderr, "cannot activate client");
-		return 1;
+		return;
 	}
 	//connect to output port
 	if ((ports = jack_get_ports (client, NULL, NULL, JackPortIsPhysical|JackPortIsInput)) == NULL) {
@@ -138,9 +151,32 @@ int main(int argc, char *argv[])
 		fprintf (stderr, "cannot connect output ports\n");
 	}
 	free (ports);
-	//wait
-	sleep(5);
-	//quit the client
+	//start up semaphore for playing samples array
+	playing_samples_sem = sem_open ("pSem", O_CREAT | O_EXCL, 0644, 0); 
+    /* name of semaphore is "pSem", semaphore is reached using this name */
+    sem_unlink ("pSem");
+}
+
+void stop_pijam(){
+	sem_destroy (playing_samples_sem);
 	jack_client_close (client);
-	exit(0);
+}
+
+//plays a sample by index
+void play_sample(int i){
+	sem_wait(playing_samples_sem);
+	int i;
+	for (i = 0; i < playing_samples_l; ++i)
+	{
+		if(playing_samples[i].index >= playing_samples[i].sample_l){
+			//index is over length, sample is garbaged
+			break;
+		}
+	}
+	if(i >= playing_samples_l){
+		printf("out of range\n");
+	}else{
+		playing_samples[i] = global_samples[i];
+	}
+	sem_post(playing_samples_sem);
 }
