@@ -12,18 +12,35 @@
 #include <sys/types.h> 
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <pthread.h>
 #include "jack_client.h"
+
+typedef struct
+{
+	int index;
+	int size;
+	pthread_t* thread_ids;
+	int* newsockfds;
+} thread_pool;
 
 int doprocessing(int sock);
 
-int main( int argc, char *argv[] )
-{
-	//Start pijam
-	start_pijam();
+void* handle_connection(void* args){
+	int* sock = (int*)args;
+	int r = doprocessing(*sock);
+	close(*sock);
+	exit(r);
+}
 
+int main( int argc, char *argv[])
+{
 	int sockfd, newsockfd, portno, clilen;
 	struct sockaddr_in serv_addr, cli_addr;
-	int  pid;
+
+	// Init thread pool
+	thread_pool tp = {0, 10, NULL};
+	tp.thread_ids = (pthread_t*)malloc(tp.size*sizeof(pthread_t));
+	tp.newsockfds = (int*)malloc(tp.size*sizeof(int));
 
 	/* First call to socket() function */
 	sockfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -55,6 +72,9 @@ int main( int argc, char *argv[] )
 	listen(sockfd,5);
 	clilen = sizeof(cli_addr);
 
+	//Start pijam
+	start_pijam();
+
 	while (1)
 	{
 		newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, (socklen_t * restrict) &clilen);
@@ -64,23 +84,20 @@ int main( int argc, char *argv[] )
 		}
 
 		/* Create child process */
-		pid = fork();
-		if (pid < 0){
-			perror("ERROR on fork");
-			exit(1);
+		tp.newsockfds[tp.index] = newsockfd;
+		if(pthread_create(&tp.thread_ids[tp.index], NULL, handle_connection, &tp.newsockfds[tp.index])){
+			printf("error spawning thread\n");
 		}
-
-		if (pid == 0){
-			/* This is the client process */
-			close(sockfd);
-			int r = doprocessing(newsockfd);
-			stop_pijam();
-			exit(r);
+		tp.index++;
+		if(tp.index >= tp.size){
+			//realloc
+			tp.size *= 2;
+			tp.thread_ids = (pthread_t*)realloc(tp.thread_ids, tp.size * sizeof(pthread_t));
+			tp.newsockfds = (int*)realloc(tp.newsockfds, tp.size * sizeof(int));
 		}
-		else{
-			close(newsockfd);
-		}
+		//close(newsockfd);
 	} /* end of while */
+	stop_pijam();
 }
 
 int doprocessing (int sock)
@@ -99,6 +116,7 @@ int doprocessing (int sock)
 			//this is the exit code
 			return 0;
 		}
+		play_sample(0);
 		printf("inst: %d, extra: %d\n", instrument, extra);
 
 		if (n < 0){

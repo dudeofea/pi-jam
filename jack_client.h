@@ -3,5 +3,6 @@
 
 void start_pijam();
 void stop_pijam();
+void play_sample(int ins);
 
 #endif

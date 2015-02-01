@@ -10,6 +10,7 @@
 #include <math.h>
 #include <jack/jack.h>
 #include <semaphore.h>
+#include <fcntl.h>
 #include "jack_client.h"
 
 jack_port_t *in_port;
@@ -31,10 +32,10 @@ typedef struct
 
 float sine_wave_buf[SINE_WAVE_LEN];
 //sample library
-mp3_sample global_samples;
+mp3_sample* global_samples;
 
 //samples being played
-mp3_sample playing_samples;
+mp3_sample* playing_samples;
 int playing_samples_l = 0;
 sem_t *playing_samples_sem;
 
@@ -46,7 +47,7 @@ void output_sample(mp3_sample *smp, float *buf){
 	if(size - index < BUFFER_LEN){
 		play_len = size - index;
 	}
-	//printf("i:%d, l:%d\n", index, play_len);
+	printf("i:%d, l:%d\n", index, play_len);
 	for (int i = 0; i < play_len; ++i)
 	{
 		buf[i] += sample_buf[index++];
@@ -64,12 +65,16 @@ int process_frames(jack_nframes_t nframes, void *arg){
 	//reset
 	memset(out, 0, BUFFER_BYTES);
 	//play samples
-	for (int i = 0; i < playing_samples_l; ++i)
+	/*for (int i = 0; i < playing_samples_l; ++i)
 	{
+		if(playing_samples[i].sample_l > 0)
+			printf("%d i: %d, s: %d\n", i, playing_samples[i].index, playing_samples[i].sample_l);
 		if(playing_samples[i].index < playing_samples[i].sample_l){
+			printf("playing sample %d\n", i);
 			output_sample(&playing_samples[i], out);
 		}
-	}
+	}*/
+	output_sample(&playing_samples[0], out);
 	return 0;
 }
 
@@ -127,7 +132,9 @@ void start_pijam()
 		sine_wave_buf[i] = sin((float)(2 * PI * i) / SINE_WAVE_LEN);
 	}
 	//init samples
-	global_samples = 
+	global_samples = (mp3_sample*) malloc(10*sizeof(mp3_sample));
+	playing_samples = (mp3_sample*) malloc(10*sizeof(mp3_sample));
+	playing_samples_l = 10;
 	global_samples[0] = load_mp3_sample("samples/funk_d.mp3", 0, 0);
 	//connect to jackd
 	client = jack_client_open ("pedal", JackNullOption, NULL);
@@ -152,20 +159,23 @@ void start_pijam()
 	}
 	free (ports);
 	//start up semaphore for playing samples array
-	playing_samples_sem = sem_open ("pSem", O_CREAT | O_EXCL, 0644, 0); 
+	playing_samples_sem = sem_open ("pSem", O_CREAT | O_EXCL, 0644, 1); 
     /* name of semaphore is "pSem", semaphore is reached using this name */
     sem_unlink ("pSem");
 }
 
 void stop_pijam(){
+	free(global_samples);
+	free(playing_samples);
 	sem_destroy (playing_samples_sem);
 	jack_client_close (client);
 }
 
 //plays a sample by index
-void play_sample(int i){
+void play_sample(int ins){
 	sem_wait(playing_samples_sem);
 	int i;
+	//look for garbarged samples
 	for (i = 0; i < playing_samples_l; ++i)
 	{
 		if(playing_samples[i].index >= playing_samples[i].sample_l){
@@ -176,7 +186,9 @@ void play_sample(int i){
 	if(i >= playing_samples_l){
 		printf("out of range\n");
 	}else{
-		playing_samples[i] = global_samples[i];
+		//load up sample
+		playing_samples[i] = global_samples[ins];
+		printf("sample %d %d %d %d\n", i, playing_samples[i].index, playing_samples[i].sample_l, (unsigned int)playing_samples[i].sample_buf);
 	}
 	sem_post(playing_samples_sem);
 }
