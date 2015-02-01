@@ -158,13 +158,13 @@ void start_pijam()
 	global_samples = (mp3_sample*) malloc(10*sizeof(mp3_sample));
 	playing_samples = (mp3_sample*) malloc(10*sizeof(mp3_sample));
 	playing_samples_l = 10;
-	global_samples[0] = load_mp3_sample("samples/taiko.mp3", 0.0, 0.8);
-	global_samples[1] = load_mp3_sample("samples/taiko.mp3", 2.4, 3.2);
-	global_samples[2] = load_mp3_sample("samples/funk_d.mp3", 0, 0);
-	global_samples[3] = load_mp3_sample("samples/low_d.mp3", 0, 0);
-	global_samples[4] = load_mp3_sample("samples/mid_d.mp3", 0, 0);
-	global_samples[5] = load_mp3_sample("samples/high_d.mp3", 0, 0);
-	global_samples[6] = load_mp3_sample("samples/airhorn.mp3", 0, 0);
+	global_samples[0] = load_mp3_sample("/home/pi/pi-jam/samples/taiko.mp3", 0.0, 0.8);
+	global_samples[1] = load_mp3_sample("/home/pi/pi-jam/samples/taiko.mp3", 2.4, 3.2);
+	global_samples[2] = load_mp3_sample("/home/pi/pi-jam/samples/funk_d.mp3", 0, 0);
+	global_samples[3] = load_mp3_sample("/home/pi/pi-jam/samples/low_d.mp3", 0, 0);
+	global_samples[4] = load_mp3_sample("/home/pi/pi-jam/samples/mid_d.mp3", 0, 0);
+	global_samples[5] = load_mp3_sample("/home/pi/pi-jam/samples/high_d.mp3", 0, 0);
+	global_samples[6] = load_mp3_sample("/home/pi/pi-jam/samples/airhorn.mp3", 0, 0);
 	//connect to jackd
 	client = jack_client_open ("pedal", JackNullOption, NULL);
 	//set process callback to function above

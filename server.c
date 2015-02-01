@@ -64,7 +64,7 @@ int main( int argc, char *argv[])
 
 	// Initialize socket structure
 	bzero((char *) &serv_addr, sizeof(serv_addr));
-	portno = 5003;
+	portno = 5002;
 
 	serv_addr.sin_family = AF_INET;
 	serv_addr.sin_addr.s_addr = INADDR_ANY;
