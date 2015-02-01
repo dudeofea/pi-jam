@@ -3,6 +3,9 @@
 *	Client to connect to jackd and spit out audio
 *
 */
+//fix for usleep
+#define _BSD_SOURCE
+
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -161,6 +164,7 @@ void start_pijam()
 	global_samples[3] = load_mp3_sample("samples/low_d.mp3", 0, 0);
 	global_samples[4] = load_mp3_sample("samples/mid_d.mp3", 0, 0);
 	global_samples[5] = load_mp3_sample("samples/high_d.mp3", 0, 0);
+	global_samples[6] = load_mp3_sample("samples/airhorn.mp3", 0, 0);
 	//connect to jackd
 	client = jack_client_open ("pedal", JackNullOption, NULL);
 	//set process callback to function above
@@ -198,6 +202,7 @@ void stop_pijam(){
 
 //plays a sample by index
 void play_sample(int ins, int pitch_shift){
+	usleep(10000);
 	sem_wait(playing_samples_sem);
 	//load up sample
 	playing_samples[playing_samples_c] = global_samples[ins];
