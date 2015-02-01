@@ -42,22 +42,17 @@ int playing_samples_c = 0;
 sem_t *playing_samples_sem;
 
 void output_sample(int smp_i, float *buf){
-	float index = 	playing_samples[smp_i].index;
-	int size = 		playing_samples[smp_i].sample_l;
-	float speed = 	playing_samples[smp_i].speed;
-	float *sample_buf = playing_samples[smp_i].sample_buf;
 	int play_len = BUFFER_LEN;
-	if(size - index < BUFFER_LEN){
-		play_len = size - index;
+	if(playing_samples[smp_i].sample_l - playing_samples[smp_i].index < BUFFER_LEN){
+		play_len = playing_samples[smp_i].sample_l - playing_samples[smp_i].index;
 	}
-	//printf("i:%d, l:%d\n", index, play_len);
 	for (int i = 0; i < play_len; ++i)
 	{
-		buf[i] += sample_buf[(int)index];
-		index += speed;
-		if(index >= size){
-			sem_wait(playing_samples_sem);
+		buf[i] += playing_samples[smp_i].sample_buf[(int)playing_samples[smp_i].index];
+		playing_samples[smp_i].index += playing_samples[smp_i].speed;
+		if(playing_samples[smp_i].index >= playing_samples[smp_i].sample_l){
 			printf("done\n");
+			sem_wait(playing_samples_sem);
 			//remove from array
 			playing_samples_c--;
 			for (int j = smp_i; j < playing_samples_c; ++j)
@@ -65,13 +60,11 @@ void output_sample(int smp_i, float *buf){
 				//shift
 				playing_samples[j] = playing_samples[j+1];
 			}
-
-			playing_samples[smp_i].sample_l = 0;
+			printf("rem l: %d\n", playing_samples_c);
 			sem_post(playing_samples_sem);
 			break;
 		}
 	}
-	playing_samples[smp_i].index = index;
 }
 
 //Process the audio frames
@@ -211,6 +204,7 @@ void play_sample(int ins, int pitch_shift){
 	playing_samples[playing_samples_c].speed = pow(2.0, (float)pitch_shift / 12);
 	playing_samples_c++;
 	//if out of bounds
+	printf("add l: %d\n", playing_samples_c);
 	if(playing_samples_c >= playing_samples_l){
 		printf("out of range\n");
 		playing_samples_l *= 2;
